@@ -26,14 +26,19 @@ class Arena:
 	def create_step_record(self):
 		opt = self.opt
 		record = DotDic({})
+		# s_t: environment state at time t
 		record.s_t = None
+		# ???
 		record.r_t = torch.zeros(opt.bs, opt.game_nagents)
+		# 
 		record.terminal = torch.zeros(opt.bs)
 
 		record.agent_inputs = []
 
 		# Track actions at time t per agent
 		record.a_t = torch.zeros(opt.bs, opt.game_nagents, dtype=torch.long)
+		# Track actions' arg at time t per agent
+		record.a_a_t = torch.zeros(opt.bs, opt.game_nagents, dtype=torch.long)
 		if not opt.model_dial:
 			record.a_comm_t = torch.zeros(opt.bs, opt.game_nagents, dtype=torch.long)
 
@@ -46,12 +51,15 @@ class Arena:
 				record.comm_target = record.comm.clone()
 
 		# Track hidden state per time t per agent
-		record.hidden = torch.zeros(opt.game_nagents, opt.model_rnn_layers, opt.bs, opt.model_rnn_size)
-		record.hidden_target = torch.zeros(opt.game_nagents, opt.model_rnn_layers, opt.bs, opt.model_rnn_size)
+		record.hidden = torch.zeros(opt.game_nagents, 34, 24, 24)
+		record.hidden_target = torch.zeros(opt.game_nagents, 34, 24, 24)
 
 		# Track Q(a_t) and Q(a_max_t) per agent
 		record.q_a_t = torch.zeros(opt.bs, opt.game_nagents)
 		record.q_a_max_t = torch.zeros(opt.bs, opt.game_nagents)
+		# Track Q(a_a_t) and Q(a_a_max_t) per agent
+		record.q_a_a_t = torch.zeros(opt.bs, opt.game_nagents)
+		record.q_a_a_max_t = torch.zeros(opt.bs, opt.game_nagents)
 
 		# Track Q(m_t) and Q(m_max_t) per agent
 		if not opt.model_dial:
@@ -91,6 +99,7 @@ class Arena:
 						comm = comm_lim
 					else:
 						comm[:, agent_idx].zero_()
+						comm = comm[:, agent_idx].unsqueeze(1)
 
 				# Get prev action per batch
 				prev_action = None
@@ -121,15 +130,17 @@ class Arena:
 
 				# Compute model output (Q function + message bits)
 				hidden_t, q_t = agent.model(**agent_inputs)
-				episode.step_records[step + 1].hidden[agent_idx] = hidden_t.squeeze()
+				episode.step_records[step + 1].hidden[agent_idx] = hidden_t #.squeeze()
 
 				# Choose next action and comm using eps-greedy selector
-				(action, action_value), (comm_vector, comm_action, comm_value) = \
+				(action, action_value, action_arg, action_arg_value), (comm_vector, comm_action, comm_value) = \
 					agent.select_action_and_comm(step, q_t, eps=self.eps, train_mode=train_mode)
 
 				# Store action + comm
 				episode.step_records[step].a_t[:, agent_idx] = action
 				episode.step_records[step].q_a_t[:, agent_idx] = action_value
+				episode.step_records[step].a_a_t[:, agent_idx] = action_arg
+				episode.step_records[step].q_a_a_t[:, agent_idx] = action_arg_value
 				episode.step_records[step + 1].comm[:, agent_idx] = comm_vector
 				if not opt.model_dial:
 					episode.step_records[step].a_comm_t[:, agent_idx] = comm_action
@@ -137,8 +148,10 @@ class Arena:
 
 			# Update game state
 			a_t = episode.step_records[step].a_t
+			a_a_t = episode.step_records[step].a_a_t
+			# TODO
 			episode.step_records[step].r_t, episode.step_records[step].terminal = \
-				self.game.step(a_t)
+				self.game.step(a_t, a_a_t)
 
 			# Accumulate steps
 			if step < opt.nsteps:
@@ -179,14 +192,15 @@ class Arena:
 						episode.step_records[step].hidden_target[agent_idx, :]
 					hidden_target_t, q_target_t = agent_target.model_target(**agent_target_inputs)
 					episode.step_records[step + 1].hidden_target[agent_idx] = \
-						hidden_target_t.squeeze()
+						hidden_target_t #.squeeze()
 
 					# Choose next arg max action and comm
-					(action, action_value), (comm_vector, comm_action, comm_value) = \
+					(action, action_value, action_arg, action_arg_value), (comm_vector, comm_action, comm_value) = \
 						agent_target.select_action_and_comm(step, q_target_t, eps=0, target=True, train_mode=True)
 
 					# save target actions, comm, and q_a_t, q_a_max_t
 					episode.step_records[step].q_a_max_t[:, agent_idx] = action_value
+					episode.step_records[step].q_a_a_max_t[:, agent_idx] = action_arg_value
 					if opt.model_dial:
 						episode.step_records[step + 1].comm_target[:, agent_idx] = comm_vector
 					else:

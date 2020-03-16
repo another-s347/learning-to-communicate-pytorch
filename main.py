@@ -7,6 +7,16 @@ from arena import Arena
 from agent import CNetAgent
 from switch.switch_game import SwitchGame
 from switch.switch_cnet import SwitchCNet
+from sc2.sc2_game import Sc2Game
+from sc2.sc2_cnet import Sc2CNet
+from absl import app, flags
+
+FLAGS = flags.FLAGS
+flags.DEFINE_string('config_path',None,'path to existing options file')
+flags.DEFINE_string('results_path',None,'path to results directory')
+flags.DEFINE_integer('ntrials',1,'number of trials to run')
+flags.DEFINE_integer('start_index',0,'starting index for trial output')
+flags.DEFINE_bool('verbose', True, 'prints training epoch rewards if set')
 
 """
 Play communication games
@@ -39,6 +49,8 @@ def create_game(opt):
 	game_name = opt.game.lower()
 	if game_name == 'switch':
 		return SwitchGame(opt)
+	elif game_name == 'sc2':
+		return Sc2Game(opt)
 	else:
 		raise Exception('Unknown game: {}'.format(game_name))
 
@@ -46,6 +58,8 @@ def create_cnet(opt):
 	game_name = opt.game.lower()
 	if game_name == 'switch':
 		return SwitchCNet(opt)
+	elif game_name == 'sc2':
+		return Sc2CNet(opt)
 	else:
 		raise Exception('Unknown game: {}'.format(game_name))
 
@@ -85,26 +99,21 @@ def run_trial(opt, result_path=None, verbose=False):
 	if result_path:
 		result_out.close()
 
-if __name__ == '__main__':
-	parser = argparse.ArgumentParser()
-	parser.add_argument('-c', '--config_path', type=str, help='path to existing options file')
-	parser.add_argument('-r', '--results_path', type=str, help='path to results directory')
-	parser.add_argument('-n', '--ntrials', type=int, default=1, help='number of trials to run')
-	parser.add_argument('-s', '--start_index', type=int, default=0, help='starting index for trial output')
-	parser.add_argument('-v', '--verbose', action='store_true', help='prints training epoch rewards if set')
-	args = parser.parse_args()
-
-	opt = DotDic(json.loads(open(args.config_path, 'r').read()))
+def main(unused_arg):
+	opt = DotDic(json.loads(open(FLAGS.config_path, 'r').read()))
 
 	result_path = None
-	if args.results_path:
-		result_path = args.config_path and os.path.join(args.results_path, Path(args.config_path).stem) or \
-			os.path.join(args.results_path, 'result-', datetime.datetime.now().isoformat())
+	if FLAGS.results_path:
+		result_path = FLAGS.config_path and os.path.join(FLAGS.results_path, Path(FLAGS.config_path).stem) or \
+			os.path.join(FLAGS.results_path, 'result-', datetime.datetime.now().isoformat())
 
-	for i in range(args.ntrials):
+	for i in range(FLAGS.ntrials):
 		trial_result_path = None
 		if result_path:
-			trial_result_path = result_path + '_' + str(i + args.start_index) + '.csv'
+			trial_result_path = result_path + '_' + str(i + FLAGS.start_index) + '.csv'
 		trial_opt = copy.deepcopy(opt)
-		run_trial(trial_opt, result_path=trial_result_path, verbose=args.verbose)
+		run_trial(trial_opt, result_path=trial_result_path, verbose=FLAGS.verbose)
 
+
+if __name__ == '__main__':
+	app.run(main)

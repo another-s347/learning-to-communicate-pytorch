@@ -44,9 +44,11 @@ class CNetAgent:
 		if not train_mode:
 			eps = 0
 		opt = self.opt
-		action_range, comm_range = self.game.get_action_range(step, self.id)
+		action_range, action_arg_range, comm_range = self.game.get_action_range(step, self.id)
 		action = torch.zeros(opt.bs, dtype=torch.long)
 		action_value = torch.zeros(opt.bs)
+		action_arg = torch.zeros(opt.bs, dtype=torch.long)
+		action_arg_value = torch.zeros(opt.bs, dtype=torch.long)
 		comm_action = torch.zeros(opt.bs).int()
 		comm_vector = torch.zeros(opt.bs, opt.game_comm_bits)
 		comm_value = None
@@ -62,12 +64,17 @@ class CNetAgent:
 		for b in range(opt.bs):
 			q_a_range = range(0, opt.game_action_space)
 			a_range = range(action_range[b, 0].item() - 1, action_range[b, 1].item())
+			a_a_range = range(action_arg_range[b, 0].item() - 1, action_arg_range[b, 1].item())
 			if should_select_random_a[b]:
 				action[b] = self._random_choice(a_range)
-				action_value[b] = q[b, action[b]]
+				action_value[b] = q[0][b, action[b]]
+				action_arg[b] = self._random_choice(a_a_range)
+				action_arg_value[b] = q[1][b, action_arg[b]]
 			else:
-				action_value[b], action[b] = q[b, a_range].max(0)
+				action_value[b], action[b] = q[0][b, a_range].max(0)
+				action_arg_value[b], action_value[b] = q[1][b, a_a_range].max(0)
 			action[b] = action[b] + 1
+			action_arg[b] = action_arg[b] + 1
 
 			q_c_range = range(opt.game_action_space, opt.game_action_space_total)
 			if comm_range[b, 1].item() > 0:
@@ -75,18 +82,18 @@ class CNetAgent:
 				if not opt.model_dial:
 					if should_select_random_comm[b]:
 						comm_action[b] = self._random_choice(c_range)
-						comm_value[b] = q[b, comm_action[b]]
+						comm_value[b] = q[0][b, comm_action[b]]
 						comm_action[b] = comm_action[b] - opt.game_action_space
 					else:
-						comm_value[b], comm_action[b] = q[b, c_range].max(0)
+						comm_value[b], comm_action[b] = q[0][b, c_range].max(0)
 					comm_vector[b][comm_action[b]] = 1
 					comm_action[b] = comm_action[b] + 1
 				else:
-					comm_vector[b] = self.dru.forward(q[b, q_c_range], train_mode=train_mode) # apply DRU
+					comm_vector[b] = self.dru.forward(q[0][b, q_c_range], train_mode=train_mode) # apply DRU
 			elif (not opt.model_dial) and opt.model_avg_q and target:
-				comm_value[b], _ = q[b, q_a_range].max(0)
+				comm_value[b], _ = q[0][b, q_a_range].max(0)
 
-		return (action, action_value), (comm_vector, comm_action, comm_value)
+		return (action, action_value, action_arg, action_arg_value), (comm_vector, comm_action, comm_value)
 
 	def episode_loss(self, episode):
 		opt = self.opt
